@@ -1,22 +1,30 @@
-use axum::{routing::get, Router, Server};
+use async_graphql::{EmptyMutation, EmptySubscription, Schema};
+use axum::{extract::Extension, routing::get, Router, Server};
 use std::net::SocketAddr;
 
 mod routes;
-use crate::routes::health;
+mod model;
+
+use crate::routes::{graphql_handler, graphql_playground, health};
+use crate::model::QueryRoot;
 
 #[tokio::main]
 async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
-    let app = create_app();
+    let schema = Schema::build(QueryRoot, EmptyMutation, EmptySubscription).finish();
+
+    let app = create_app(schema);
     Server::bind(&addr)
         .serve(app.into_make_service())
         .await
         .unwrap();
 }
 
-fn create_app() -> Router {
+fn create_app(schema: Schema<QueryRoot, EmptyMutation, EmptySubscription>) -> Router {
     Router::new()
+        .route("/", get(graphql_playground).post(graphql_handler))
         .route("/health", get(health))
+        .layer(Extension(schema))
 }
 
 #[cfg(test)]
@@ -32,6 +40,11 @@ mod test {
         response::Response
     };
     use tower::ServiceExt;
+
+    fn test_create_app() -> Router {
+        Router::new()
+            .route("/health", get(health))
+    }
 
     fn get_req_with_empty(method: Method, path: &str) -> Request<Body> {
         Request::builder()
@@ -56,7 +69,7 @@ mod test {
         };
 
         let req = get_req_with_empty(Method::GET, "/health");
-        let res = create_app().oneshot(req).await.unwrap();
+        let res = test_create_app().oneshot(req).await.unwrap();
         let health = res_health(res).await;
 
         assert_eq!(expected, health);
