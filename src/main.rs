@@ -1,11 +1,14 @@
 use async_graphql::{EmptyMutation, EmptySubscription, Schema};
-use axum::{extract::Extension, routing::get, Router, Server};
+use axum::{extract::Extension, middleware, routing::get, Router, Server};
+use std::future::ready;
 use std::net::SocketAddr;
 
 mod routes;
 mod model;
+mod observability;
 
 use crate::routes::{graphql_handler, graphql_playground, health};
+use crate::observability::metrics::{create_prometheus_recorder, track_metrics};
 use crate::model::QueryRoot;
 
 #[tokio::main]
@@ -21,9 +24,13 @@ async fn main() {
 }
 
 fn create_app(schema: Schema<QueryRoot, EmptyMutation, EmptySubscription>) -> Router {
+    let prometheus_recorder = create_prometheus_recorder();
+
     Router::new()
-        .route("/", get(graphql_playground).post(graphql_handler))
         .route("/health", get(health))
+        .route("/", get(graphql_playground).post(graphql_handler))
+        .route("/metrics", get(move || ready(prometheus_recorder.render())))
+        .route_layer(middleware::from_fn(track_metrics))
         .layer(Extension(schema))
 }
 
