@@ -9,6 +9,10 @@ use axum::{
 };
 use serde::{Serialize, Deserialize};
 
+use opentelemetry::trace::TraceContextExt;
+use tracing::{info, span, Instrument, Level};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
+
 #[derive(Serialize, Deserialize, PartialEq, Debug)] 
 pub(crate) struct Health {
     pub healthy: bool
@@ -31,5 +35,21 @@ pub(crate) async fn graphql_handler(
     req: GraphQLRequest,
     Extension(schema): Extension<ServiceSchema>,
 ) -> GraphQLResponse {
-    schema.execute(req.into_inner()).await.into()
+    let span = span!(Level::INFO, "graphql_execution");
+    let response = async move {
+        schema.execute(req.into_inner()).await
+    }
+    .instrument(span.clone())
+    .await;
+    info!("Processing GraphQL request finished");
+    response
+        .extension(
+            "traceId"
+            , async_graphql::Value::String(format!(
+                "{}",
+                span.context().span().span_context().trace_id()
+            )),
+        )
+        .into()
+
 }
